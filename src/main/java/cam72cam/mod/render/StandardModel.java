@@ -2,6 +2,8 @@ package cam72cam.mod.render;
 
 import cam72cam.mod.item.Fuzzy;
 import cam72cam.mod.item.ItemStack;
+import cam72cam.mod.math.Vec3d;
+import cam72cam.mod.math.Vec3i;
 import cam72cam.mod.render.opengl.RenderContext;
 import cam72cam.mod.render.opengl.RenderState;
 import cam72cam.mod.render.opengl.Texture;
@@ -26,8 +28,9 @@ import org.apache.commons.lang3.tuple.Pair;
 import util.Matrix4;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
-import java.util.*;
+import java.util.Map;
 
 /** A model that can render both standard MC constructs and custom OpenGL */
 public class StandardModel {
@@ -62,12 +65,41 @@ public class StandardModel {
         return this;
     }
 
+    public StandardModel addColorBlock(Color color, float height, Vec3i basePos, Vec3d topFacing) {
+        BlockState state = Fuzzy.CONCRETE.enumerate()
+                .stream()
+                .map(x -> Block.byItem(x.internal().getItem()))
+                .filter(x -> x.defaultMapColor() == color.internal.getMapColor())
+                .map(Block::defaultBlockState)
+                .findFirst().get();
+
+        BakedModel model = Minecraft.getInstance().getBlockRenderer().getBlockModelShaper().getBlockModel(state);
+        BakedScaledModel scaledModel = new BakedScaledModel(model, height, basePos, topFacing);
+        Pair<BlockState, BakedModel> pair = Pair.of(state, scaledModel);
+        models.add(pair);
+        Matrix4 guiTransform = new Matrix4().translate(basePos.x, basePos.y, basePos.z).scale(1, height, 1);
+        inGuiBlock.put(pair, getRenderFunc(new net.minecraft.world.item.ItemStack(state.getBlock().asItem()), guiTransform));
+        return this;
+    }
+
     /** Add snow layers */
     public StandardModel addSnow(int layers, Matrix4 transform) {
         layers = Math.max(1, Math.min(8, layers));
         BlockState state = Blocks.SNOW.defaultBlockState().setValue(SnowLayerBlock.LAYERS, layers);
         BakedModel model = Minecraft.getInstance().getBlockRenderer().getBlockModelShaper().getBlockModel(state);
         models.add(Pair.of(state, new BakedScaledModel(model, transform)));
+        return this;
+    }
+
+    public StandardModel addSnow(int layers, float height, Vec3i basePos, Vec3d topFacing) {
+        layers = Math.max(1, Math.min(8, layers));
+        BlockState state = Blocks.SNOW.defaultBlockState().setValue(SnowLayerBlock.LAYERS, layers);
+        BakedModel model = Minecraft.getInstance().getBlockRenderer().getBlockModelShaper().getBlockModel(state);
+        BakedScaledModel scaledModel = new BakedScaledModel(model, height, basePos, topFacing);
+        Pair<BlockState, BakedModel> pair = Pair.of(state, scaledModel);
+        models.add(pair);
+        Matrix4 guiTransform = new Matrix4().translate(basePos.x, basePos.y, basePos.z).scale(1, height, 1);
+        inGuiBlock.put(pair, getRenderFunc(new net.minecraft.world.item.ItemStack(state.getBlock().asItem()), guiTransform));
         return this;
     }
 
@@ -81,6 +113,17 @@ public class StandardModel {
         Pair<BlockState, BakedModel> pair = Pair.of(state, new BakedScaledModel(model, transform));
         models.add(pair);
         inGuiBlock.put(pair, getRenderFunc(bed.internal(), transform));
+        return this;
+    }
+
+    public StandardModel addItemBlock(ItemStack bed, float height, Vec3i basePos, Vec3d topFacing) {
+        BlockState state = itemToBlockState(bed);
+        BakedModel model = Minecraft.getInstance().getBlockRenderer().getBlockModelShaper().getBlockModel(state);
+        BakedScaledModel scaledModel = new BakedScaledModel(model, height, basePos, topFacing);
+        Pair<BlockState, BakedModel> pair = Pair.of(state, scaledModel);
+        models.add(pair);
+        Matrix4 guiTransform = new Matrix4().translate(basePos.x, basePos.y, basePos.z).scale(1, height, 1);
+        inGuiBlock.put(pair, getRenderFunc(bed.internal(), guiTransform));
         return this;
     }
 
