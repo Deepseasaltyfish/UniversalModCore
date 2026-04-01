@@ -14,6 +14,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.ForgeConfigSpec;
@@ -21,6 +22,10 @@ import net.minecraftforge.common.ForgeConfigSpec;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
 public class Light {
@@ -31,18 +36,97 @@ public class Light {
     private LightEntity internal;
     private double lightLevel;
 
+
+    /**
+     * return simulate Of dynamic light level
+     * */
+    public static double getSimulateOfDynamicLightLevel(Vec3d center) {
+        double extra = 0.0;
+        List<LightInfo> lights = getLightsInRange(center, 8.0);
+        for (LightInfo light : lights) {
+            double distSq = center.distanceToSquared(light.pos);
+            if (distSq < 64.0) {
+                double dist = Math.sqrt(distSq);
+                double factor = 1.0 - dist / 8.0;
+                extra = Math.max(light.level * factor, extra);
+            }
+        }
+        return extra;
+    }
+
+    private static final Map<ChunkPos, List<LightEntity>> CHUNK_LIGHTS = new HashMap<>();
+    private static final Object LOCK = new Object();
+    private static void registerInChunk(LightEntity entity) {
+        if (entity == null) return;
+        ChunkPos cp = entity.chunkPosition();
+        synchronized (LOCK) {
+            CHUNK_LIGHTS.computeIfAbsent(cp, k -> new ArrayList<>()).add(entity);
+        }
+    }
+    private static void unregisterFromChunk(LightEntity entity) {
+        if (entity == null) return;
+        ChunkPos cp = entity.chunkPosition();
+        synchronized (LOCK) {
+            List<LightEntity> list = CHUNK_LIGHTS.get(cp);
+            if (list != null) {
+                list.remove(entity);
+                if (list.isEmpty()) CHUNK_LIGHTS.remove(cp);
+            }
+        }
+    }
+    public static List<LightInfo> getLightsInRange(Vec3d center, double radius) {
+        int minX = (int)Math.floor((center.x - radius) / 16);
+        int maxX = (int)Math.floor((center.x + radius) / 16);
+        int minZ = (int)Math.floor((center.z - radius) / 16);
+        int maxZ = (int)Math.floor((center.z + radius) / 16);
+        List<LightInfo> result = new ArrayList<>();
+        synchronized (LOCK) {
+            for (int cx = minX; cx <= maxX; cx++) {
+                for (int cz = minZ; cz <= maxZ; cz++) {
+                    ChunkPos cp = new ChunkPos(cx, cz);
+                    List<LightEntity> entities = CHUNK_LIGHTS.get(cp);
+                    if (entities != null) {
+                        for (LightEntity e : entities) {
+                            if (!e.isAlive()) continue;//can avoid some ghost entities?
+                            double dx = e.position().x - center.x;
+                            double dy = e.position().y - center.y;
+                            double dz = e.position().z - center.z;
+                            if (dx*dx + dy*dy + dz*dz <= radius*radius) {
+                                result.add(new LightInfo(new Vec3d(e.position().x, e.position().y, e.position().z), e.getSimulateLightLevel()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return result;
+    }
+    public static class LightInfo {
+        public final Vec3d pos;
+        public final double level;
+        public LightInfo(Vec3d pos, double level) {
+            this.pos = pos;
+            this.level = level;
+        }
+    }
+
     public Light(World world, Vec3d pos, double lightLevel) {
         init(world.internal, pos.internal(), lightLevel);
     }
 
     public void remove() {
+        if(internal == null) return;
+        unregisterFromChunk(internal);
         internal.remove(Entity.RemovalReason.KILLED);
         lights.remove(internal);
         internal = null;
     }
 
     public void setPosition(Vec3d pos) {
+        if (internal == null) return;
+        unregisterFromChunk(internal);
         internal.setPos(pos.x, pos.y, pos.z);
+        registerInChunk(internal);
     }
 
     public void setLightLevel(double lightLevel) {
@@ -55,6 +139,7 @@ public class Light {
             return;
         }
         if (internal != null) {
+            unregisterFromChunk(internal);
             internal.remove(Entity.RemovalReason.KILLED);
         }
         int ll = (int) Math.ceil((lightLevel * 15));
@@ -62,6 +147,11 @@ public class Light {
         ll = Math.max(ll, 1);
         EntityType<LightEntity> type = types[ll];
         internal = type.create(world);
+
+        internal.setSimulateLightLevel(lightLevel);
+        registerInChunk(internal);
+
+
         internal.setPos(pos.x, pos.y, pos.z);
 //        world.addFreshEntity(internal);
         this.lightLevel = lightLevel;
@@ -93,7 +183,7 @@ public class Light {
         }
     }
 
-    public static void onClientTick() {
+    private static void onClientTick() {
         if(Minecraft.getInstance().isPaused()) return;
         for (LightEntity light : lights) {
             ClientLevel level = (ClientLevel) light.level();
@@ -103,9 +193,24 @@ public class Light {
 
     // Client only
     private static class LightEntity extends Entity {
+        private double simulateLightLevel;
         public LightEntity(EntityType<?> entityTypeIn, Level world) {
             super(entityTypeIn, world);
             super.noPhysics = true;
+        }
+
+        public void setSimulateLightLevel(double level) {
+            this.simulateLightLevel = level;
+        }
+
+        public double getSimulateLightLevel() {
+            return simulateLightLevel;
+        }
+
+        @Override
+        public void remove(RemovalReason p_146834_) {
+            unregisterFromChunk(this);
+            super.remove(p_146834_);
         }
 
         @Override
