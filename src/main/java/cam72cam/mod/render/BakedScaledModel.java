@@ -98,7 +98,6 @@ class BakedScaledModel implements BakedModel {
                         finalY = origY;
                     }
 
-                    // 使用 Vec3i 的公开字段
                     newData[baseIndex]     = Float.floatToRawIntBits(basePos.x + origX);
                     newData[baseIndex + 1] = Float.floatToRawIntBits(basePos.y + finalY);
                     newData[baseIndex + 2] = Float.floatToRawIntBits(basePos.z + origZ);
@@ -116,7 +115,6 @@ class BakedScaledModel implements BakedModel {
         }
     }
 
-    // 普通变换
     private List<BakedQuad> transformQuads(List<BakedQuad> quads, Matrix4 transform) {
         Matrix4f mat = transform.convertToMoj();
         Transformation transformation = new Transformation(mat);
