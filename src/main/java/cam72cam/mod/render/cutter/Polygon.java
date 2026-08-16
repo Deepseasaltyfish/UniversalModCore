@@ -1,7 +1,7 @@
 package cam72cam.mod.render.cutter;
 
+import cam72cam.mod.math.Plane;
 import cam72cam.mod.math.Vec3d;
-import cam72cam.mod.render.cutter.adapter.QuadTemplate;
 import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.ArrayList;
@@ -14,17 +14,12 @@ public final class Polygon {
     private final List<ClipVertex> vertices;
     private final Vec3d normal; // Could be null
 
-    public Polygon(Collection<ClipVertex> vertices) {
-        this(vertices, null);
-    }
-
     public Polygon(Collection<ClipVertex> vertices, Vec3d normal) {
         this.vertices = Collections.unmodifiableList(new ArrayList<>(vertices));
         this.normal = normal;
     }
 
-    public static Polygon generateUV(Polygon polygon, QuadTemplate template) {
-
+    public Polygon generateUV(QuadTemplate template) {
         Vec3d p0 = template.sourcePos[0];
         Vec3d p1 = template.sourcePos[1];
         Vec3d p3 = template.sourcePos[3];
@@ -41,10 +36,10 @@ public final class Polygon {
         double det = a00 * a11 - a01 * a01;
 
         if (Math.abs(det) < 1E-8) {
-            return polygon.copy();
+            return this;
         }
 
-        List<ClipVertex> vertices = new ArrayList<>(polygon.getVertices());
+        List<ClipVertex> vertices = new ArrayList<>(this.vertices);
 
         for (ClipVertex vertex : vertices) {
             Vec3d d = vertex.pos.subtract(p0);
@@ -52,24 +47,20 @@ public final class Polygon {
             double b0 = d.dotProduct(e1);
             double b1 = d.dotProduct(e2);
 
-            double x = (b0 * a11 - b1 * a01) / det;
-            double y = (b1 * a00 - b0 * a01) / det;
+            float x = (float) ((b0 * a11 - b1 * a01) / det);
+            float y = (float) ((b1 * a00 - b0 * a01) / det);
 
-            vertex.u = (float) (
-                    template.sourceU[0]
-                            + x * (template.sourceU[1] - template.sourceU[0])
-                            + y * (template.sourceU[3] - template.sourceU[0])
-            );
+            vertex.u = template.sourceU[0]
+                       + x * (template.sourceU[1] - template.sourceU[0])
+                       + y * (template.sourceU[3] - template.sourceU[0]);
 
-            vertex.v = (float) (
-                    template.sourceV[0]
-                            + x * (template.sourceV[1] - template.sourceV[0])
-                            + y * (template.sourceV[3] - template.sourceV[0])
-            );
+            vertex.v = template.sourceV[0]
+                       + x * (template.sourceV[1] - template.sourceV[0])
+                       + y * (template.sourceV[3] - template.sourceV[0]);
         }
 
         Collections.reverse(vertices);
-        return new Polygon(vertices, polygon.getNormal());
+        return new Polygon(vertices, this.normal);
     }
 
     /**
@@ -77,12 +68,11 @@ public final class Polygon {
      * Triangles are represented as degenerate quads (last vertex duplicated).
      * Assumes input polygon is convex; for concave polygons, use ear clipping first.
      *
-     * @param polygon the convex polygon to split
      * @return a list of quads (each as a Polygon with 4 vertices)
      */
-    public static List<Polygon> convexToQuads(Polygon polygon) {
+    public List<Polygon> convexToQuads() {
         List<Polygon> result = new ArrayList<>();
-        List<ClipVertex> verts = polygon.getVertices();
+        List<ClipVertex> verts = this.vertices;
         int n = verts.size();
         if (n < 3) return result;
 
@@ -96,33 +86,18 @@ public final class Polygon {
             quadVerts.add(b);
             quadVerts.add(c);
             quadVerts.add(c);
-            result.add(new Polygon(quadVerts, polygon.getNormal()));
+            result.add(new Polygon(quadVerts, this.normal));
         }
         return result;
-    }
-
-    static ClipVertex intersection(
-            ClipVertex a,
-            ClipVertex b,
-            double da,
-            double db) {
-
-        double t = da / (da - db);
-        return a.lerp(b, t);
     }
 
     /**
      * Keep the positive side of the plane.
      * Returns ClipResult containing clipped polygon and list of (exit, entry) intersection pairs.
      */
-    public static ClipResult clip(Polygon polygon, Plane plane) {
-        List<ClipVertex> vertices = polygon.getVertices();
-
+    public ClipResult clip(Plane plane) {
         if (vertices.isEmpty()) {
-            return new ClipResult(
-                    new Polygon(new ArrayList<>(), polygon.getNormal()),
-                    new ArrayList<>()
-            );
+            return new ClipResult(new Polygon(Collections.emptyList(), normal), Collections.emptyList());
         }
 
         List<ClipVertex> clippedVerts = new ArrayList<>();
@@ -176,7 +151,7 @@ public final class Polygon {
             intersectionPairs.add(Pair.of(lastExit, firstEntry));
         }
 
-        Polygon clippedPolygon = new Polygon(clippedVerts, polygon.getNormal());
+        Polygon clippedPolygon = new Polygon(clippedVerts, this.normal);
         return new ClipResult(clippedPolygon, intersectionPairs);
     }
 
@@ -188,7 +163,7 @@ public final class Polygon {
         return normal;
     }
 
-    public Polygon copy() {
-        return new Polygon(vertices, normal);
+    private static ClipVertex intersection(ClipVertex a, ClipVertex b, double da, double db) {
+        return a.lerp(b, da / (da - db));
     }
 }
