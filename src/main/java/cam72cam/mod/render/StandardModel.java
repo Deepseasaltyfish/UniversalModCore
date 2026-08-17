@@ -1,8 +1,10 @@
 package cam72cam.mod.render;
 
 import cam72cam.mod.item.ItemStack;
+import cam72cam.mod.math.Plane;
 import cam72cam.mod.math.Vec3d;
 import cam72cam.mod.model.obj.VertexBuffer;
+import cam72cam.mod.render.cutter.*;
 import cam72cam.mod.render.opengl.RenderContext;
 import cam72cam.mod.render.opengl.RenderState;
 import cam72cam.mod.render.opengl.Texture;
@@ -136,7 +138,67 @@ public class StandardModel {
     }
 
     public void renderQuads(IBlockAccess world, int x, int y, int z) {
+        TessellatorCapture.begin();
+
         models.forEach(a -> a.accept(new RenderInfo(world, x, y, z)));
+
+        List<TessellatorQuad> quads = TessellatorCapture.end();
+
+        System.out.println("Captured quads: " + quads.size());
+
+        // 测试平面：x = 0.5，只保留 x >= 0.5
+        Plane plane = new Plane(
+                new Vec3d(-100, 0, 0),
+                new Vec3d(1, 0, 0)
+        );
+
+        List<TessellatorQuad> clipped =
+                MeshPlaneCutter.cut(
+                        quads,
+                        plane,
+                        new TessellatorQuadAdapter()
+                );
+
+        System.out.println("Clipped quads: " + clipped.size());
+
+        Tessellator tessellator = Tessellator.instance;
+
+        for (TessellatorQuad quad : clipped) {
+            for (ClipVertex vertex : quad.vertices) {
+
+                if (quad.hasColor) {
+                    tessellator.setColorOpaque_I(vertex.color);
+                }
+
+                if (quad.hasBrightness) {
+                    tessellator.setBrightness(vertex.light);
+                }
+
+                if (quad.hasNormals) {
+                    tessellator.setNormal(
+                            vertex.nx / 127.0f,
+                            vertex.ny / 127.0f,
+                            vertex.nz / 127.0f
+                    );
+                }
+
+                if (quad.hasTexture) {
+                    tessellator.addVertexWithUV(
+                            vertex.pos.x,
+                            vertex.pos.y,
+                            vertex.pos.z,
+                            vertex.u,
+                            vertex.v
+                    );
+                } else {
+                    tessellator.addVertex(
+                            vertex.pos.x,
+                            vertex.pos.y,
+                            vertex.pos.z
+                    );
+                }
+            }
+        }
     }
 
     /** Render the OpenGL parts directly
