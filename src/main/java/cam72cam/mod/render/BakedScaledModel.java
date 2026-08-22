@@ -1,26 +1,22 @@
 package cam72cam.mod.render;
 
-import cam72cam.mod.math.Plane;
-import cam72cam.mod.render.cutter.BakedQuadAdapter;
-import cam72cam.mod.render.cutter.MeshPlaneCutter;
 import com.mojang.math.Transformation;
 import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.renderer.block.model.ItemOverrides;
 import net.minecraft.client.renderer.block.model.ItemTransforms;
+import cam72cam.mod.render.cutter.MeshPlaneCutter;
+import cam72cam.mod.math.Plane;
+import cam72cam.mod.render.cutter.BakedQuadAdapter;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.client.resources.model.BakedModel;
 import net.minecraft.core.Direction;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.block.state.BlockState;
-import net.neoforged.neoforge.client.model.IQuadTransformer;
 import net.neoforged.neoforge.client.model.QuadTransformers;
 import org.joml.Matrix4f;
 import util.Matrix4;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * Internal class to scale an existing Baked Model
@@ -35,6 +31,8 @@ class BakedScaledModel implements BakedModel {
     private final boolean isCut;
     private final Map<Direction, List<BakedQuad>> quadCache = new HashMap<>();
 
+    private final RandomSource quadRand = RandomSource.create();
+
     public BakedScaledModel(BakedModel source, Matrix4 transform) {
         this.source = source;
         this.transform = transform;
@@ -44,51 +42,28 @@ class BakedScaledModel implements BakedModel {
     public BakedScaledModel(BakedModel source, float height) {
         this.source = source;
         transform = new Matrix4().scale(1, height, 1);
-        isCut = false;
+        this.isCut = false;
     }
 
     public BakedScaledModel(BakedModel source, Matrix4 transform, Plane plane) {
-
         this.source = source;
         this.transform = transform;
         this.isCut = true;
 
         quadCache.put(null, new ArrayList<>());
-
         for (Direction dir : Direction.values()) {
             quadCache.put(dir, new ArrayList<>());
         }
 
-        RandomSource rand = RandomSource.create();
-
-        List<BakedQuad> all = new ArrayList<>();
-
-        all.addAll(source.getQuads(null, null, rand));
-
+        List<BakedQuad> all = new ArrayList<>(source.getQuads(null, null, quadRand));
         for (Direction dir : Direction.values()) {
-            all.addAll(source.getQuads(null, dir, rand));
+            all.addAll(source.getQuads(null, dir, quadRand));
         }
 
-        all = MeshPlaneCutter.cut(
-                all,
-                plane,
-                new BakedQuadAdapter()
-        );
-
-        Matrix4f mat = transform.convertToMoj();
-
-        IQuadTransformer qt =
-                QuadTransformers.applying(
-                        new Transformation(mat));
-
-        all = qt.process(all);
-
+        all = MeshPlaneCutter.cut(transformQuads(all), plane, new BakedQuadAdapter());
         for (BakedQuad quad : all) {
-
             quadCache.get(null).add(quad);
-
             Direction dir = quad.getDirection();
-
             if (dir != null) {
                 quadCache.get(dir).add(quad);
             }
@@ -98,19 +73,19 @@ class BakedScaledModel implements BakedModel {
     @Override
     public List<BakedQuad> getQuads(BlockState state, Direction side, RandomSource rand) {
         if(isCut) {
-            return quadCache.getOrDefault(
-                    side,
-                    List.of()
-            );
+            return quadCache.getOrDefault(side, Collections.emptyList());
         }
 
         if (quadCache.get(side) == null) {
-            Matrix4f mat = transform.convertToMoj();
-            IQuadTransformer qt = QuadTransformers.applying(new Transformation(mat));
-            quadCache.put(side, qt.process(source.getQuads(state, side, rand)));
+            quadCache.put(side, transformQuads(source.getQuads(state, side, rand)));
         }
 
         return quadCache.get(side);
+    }
+
+    private List<BakedQuad> transformQuads(List<BakedQuad> quads) {
+        Matrix4f mat = transform.convertToMoj();
+        return QuadTransformers.applying(new Transformation(mat)).process(quads);
     }
 
     @Override

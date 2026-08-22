@@ -80,22 +80,14 @@ public enum Facing {
     }
 
     public Facing getOpposite() {
-        switch (this) {
-            case DOWN:
-                return UP;
-            case UP:
-                return DOWN;
-            case NORTH:
-                return SOUTH;
-            case SOUTH:
-                return NORTH;
-            case WEST:
-                return EAST;
-            case EAST:
-                return WEST;
-            default:
-                return null;
-        }
+        return switch (this) {
+            case DOWN -> UP;
+            case UP -> DOWN;
+            case NORTH -> SOUTH;
+            case SOUTH -> NORTH;
+            case WEST -> EAST;
+            case EAST -> WEST;
+        };
     }
 
     public Facing rotate(Rotation rot) {

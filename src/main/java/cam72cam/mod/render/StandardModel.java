@@ -27,9 +27,8 @@ import org.apache.commons.lang3.tuple.Pair;
 import util.Matrix4;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /** A model that can render both standard MC constructs and custom OpenGL */
 public class StandardModel {
@@ -65,8 +64,8 @@ public class StandardModel {
         Pair<BlockState, BakedModel> pair = Pair.of(
                 state,
                 plane == null
-                        ? new BakedScaledModel(model, transform)
-                        : new BakedScaledModel(model, transform, plane)
+                ? new BakedScaledModel(model, transform)
+                : new BakedScaledModel(model, transform, plane)
         );
         models.add(pair);
         inGuiBlock.put(pair, getRenderFunc(new net.minecraft.world.item.ItemStack(state.getBlock().asItem()), transform));
@@ -82,13 +81,12 @@ public class StandardModel {
         layers = Math.max(1, Math.min(8, layers));
         BlockState state = Blocks.SNOW.defaultBlockState().setValue(SnowLayerBlock.LAYERS, layers);
         BakedModel model = Minecraft.getInstance().getBlockRenderer().getBlockModelShaper().getBlockModel(state);
-        Pair<BlockState, BakedModel> pair = Pair.of(
+        models.add(Pair.of(
                 state,
                 plane == null
-                        ? new BakedScaledModel(model, transform)
-                        : new BakedScaledModel(model, transform, plane)
-        );
-        models.add(pair);
+                ? new BakedScaledModel(model, transform)
+                : new BakedScaledModel(model, transform, plane)
+        ));
         return this;
     }
 
@@ -100,14 +98,14 @@ public class StandardModel {
     public StandardModel addItemBlock(ItemStack bed, Matrix4 transform, Plane plane) {
         BlockState state = itemToBlockState(bed);
         BakedModel model = Minecraft.getInstance().getBlockRenderer().getBlockModelShaper().getBlockModel(state);
-        if (model instanceof WeightedBakedModel weightedBakedModel) {
+        if (model instanceof WeightedBakedModel) {
             //TODO Modify result to make it not dynamic
         }
         Pair<BlockState, BakedModel> pair = Pair.of(
                 state,
                 plane == null
-                        ? new BakedScaledModel(model, transform)
-                        : new BakedScaledModel(model, transform, plane)
+                ? new BakedScaledModel(model, transform)
+                : new BakedScaledModel(model, transform, plane)
         );
         models.add(pair);
         inGuiBlock.put(pair, getRenderFunc(bed.internal(), transform));
