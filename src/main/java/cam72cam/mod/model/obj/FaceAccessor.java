@@ -3,13 +3,18 @@ package cam72cam.mod.model.obj;
 import cam72cam.mod.math.Vec3d;
 
 import javax.annotation.Nonnull;
-import java.util.*;
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+import java.util.Spliterator;
+import java.util.Spliterators;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 /**
  * A {@link VertexBuffer} API wrapper, making accessing geometry completely separated from backend.
+ * @deprecated Use common.util.FaceAccessor for new Model framework, this is kept for compatibility.
  */
+@Deprecated(since = "1.3.1", forRemoval = true)
 public class FaceAccessor implements Iterable<FaceAccessor> {
     private final OBJModel model;
 
@@ -72,21 +77,12 @@ public class FaceAccessor implements Iterable<FaceAccessor> {
      * @return OBJFace of current face
      */
     public OBJFace asOBJFace() {
-        OBJFace face = new OBJFace();
-
-        face.vertex0 = new OBJFace.Vertex(v0);
-        face.vertex1 = new OBJFace.Vertex(v1);
-        face.vertex2 = new OBJFace.Vertex(v2);
-
-        if (vbo.hasNormals) {
-            face.normal = v0.normAsVec3d();
-        } else {
-            Vec3d v0 = face.vertex0.pos;
-            Vec3d v1 = face.vertex1.pos;
-            Vec3d v2 = face.vertex2.pos;
-            face.normal = v1.subtract(v0).crossProduct(v2.subtract(v0)).normalize();
-        }
-        return face;
+        OBJFace.Vertex vert0 = new OBJFace.Vertex(v0);
+        OBJFace.Vertex vert1 = new OBJFace.Vertex(v1);
+        OBJFace.Vertex vert2 = new OBJFace.Vertex(v2);
+        return new OBJFace(vert0, vert1, vert2,
+                           vbo.hasNormals ? v0.normAsVec3d()
+                           : vert1.pos.subtract(vert0.pos).crossProduct(vert2.pos.subtract(vert0.pos)).normalize());
     }
 
     /**
