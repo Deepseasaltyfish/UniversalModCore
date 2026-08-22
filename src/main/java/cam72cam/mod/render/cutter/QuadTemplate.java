@@ -2,9 +2,9 @@ package cam72cam.mod.render.cutter;
 
 import cam72cam.mod.math.Vec3d;
 import cam72cam.mod.util.Facing;
+import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
-import com.mojang.blaze3d.vertex.VertexFormat;
 
 import java.util.List;
 

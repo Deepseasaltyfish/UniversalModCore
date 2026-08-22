@@ -2,7 +2,6 @@ package cam72cam.mod.render.cutter;
 
 import cam72cam.mod.math.Plane;
 import cam72cam.mod.math.Vec3d;
-import cam72cam.mod.util.BlockDirectionUtil;
 import cam72cam.mod.util.Facing;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import net.minecraft.client.renderer.block.model.BakedQuad;
@@ -42,7 +41,7 @@ public class BakedQuadAdapter implements PrimitiveAdapter<BakedQuad, QuadTemplat
 
         return new QuadTemplate(
                 source.getSprite(),
-                BlockDirectionUtil.fromNormal(plane.normal.scale(-1)),
+                Facing.fromNormal(plane.normal.scale(-1)),
                 source.getTintIndex(),
                 source.isShade(),
                 source.hasAmbientOcclusion(),
@@ -56,7 +55,7 @@ public class BakedQuadAdapter implements PrimitiveAdapter<BakedQuad, QuadTemplat
     }
 
     private static BakedQuad findBestQuad(List<BakedQuad> quads, Plane plane) {
-        Facing target = BlockDirectionUtil.fromNormal(plane.normal.scale(-1));
+        Facing target = Facing.fromNormal(plane.normal.scale(-1));
         if (target == null) {
             return null;
         }
@@ -68,7 +67,7 @@ public class BakedQuadAdapter implements PrimitiveAdapter<BakedQuad, QuadTemplat
             }
         }
 
-        return quads.isEmpty() ? null : quads.get(0);
+        return quads.isEmpty() ? null : quads.getFirst();
     }
 
     @Override
@@ -92,7 +91,7 @@ public class BakedQuadAdapter implements PrimitiveAdapter<BakedQuad, QuadTemplat
             return result;
         }
 
-        for (Polygon quad : Polygon.convexToQuads(polygon)) {
+        for (Polygon quad : polygon.convexToQuads()) {
             int[] data = primitive.getVertices().clone();
             List<ClipVertex> quadVerts = quad.getVertices();
 
@@ -122,7 +121,7 @@ public class BakedQuadAdapter implements PrimitiveAdapter<BakedQuad, QuadTemplat
 
         applyNormal(polygon, template.facing);
 
-        for (Polygon quad : Polygon.convexToQuads(polygon)) {
+        for (Polygon quad : polygon.convexToQuads()) {
             int[] data = template.source.getVertices().clone();
             List<ClipVertex> quadVerts = quad.getVertices();
 
@@ -157,7 +156,7 @@ public class BakedQuadAdapter implements PrimitiveAdapter<BakedQuad, QuadTemplat
 
     @Override
     public void prepareCap(Polygon polygon, Plane plane, QuadTemplate template) {
-        Polygon.generateUV(polygon, template);
+        polygon.generateUV(template);
     }
 
     private static ClipVertex readVertex(int[] data, int index) {
