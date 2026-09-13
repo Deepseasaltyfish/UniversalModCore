@@ -27,17 +27,26 @@ import java.util.function.Supplier;
 
 public class VBO {
     private static final List<VBO> vbos = new ArrayList<>();
+    private volatile boolean freed = false;
     public static void registerClientEvents() {
         // free unused textures
         ClientEvents.TICK.subscribe(() -> {
+            List<VBO> expired = new ArrayList<>();
+
             synchronized (vbos) {
                 for (VBO vbo : vbos) {
-                    if (vbo.vbo != -1 && System.currentTimeMillis() - vbo.lastUsed > 30 * 1000) {
-                        vbo.free();
+                    if ((vbo.vbo != -1 || vbo.loader != null)
+                            && System.currentTimeMillis() - vbo.lastUsed > 30 * 1000) {
+                        expired.add(vbo);
                     }
                 }
             }
+
+            for (VBO vbo : expired) {
+                vbo.free();
+            }
         });
+
         ClientEvents.REGISTER_SHADER.subscribe(event -> {
             try {
                 event.registerShader(new ShaderInstance(event.getResourceProvider(),
@@ -82,10 +91,18 @@ public class VBO {
     }
 
     private void init() {
+        if (freed) {
+            return;
+        }
+
         if (loader != null) {
+            if (loader.isCancelled()) {
+                loader = null;
+                return;
+            }
             if (loader.isDone()) {
                 try {
-                    int oldVao = GL32.glGetInteger(GL32.GL_VERTEX_ARRAY_BUFFER_BINDING);// TODO this should be GL32
+                    int oldVao = GL32.glGetInteger(GL32.GL_VERTEX_ARRAY_BUFFER_BINDING);
                     int oldVbo = GL32.glGetInteger(GL32.GL_ARRAY_BUFFER_BINDING);
 
                     vao = GL32.glGenVertexArrays();
@@ -96,17 +113,18 @@ public class VBO {
 
                     GL32.glBindVertexArray(oldVao);
                     GL32.glBindBuffer(GL32.GL_ARRAY_BUFFER, oldVbo);
-                } catch (InterruptedException | ExecutionException e) {
-                    throw new RuntimeException("Cannot create VBO: ", e);
+                } catch (InterruptedException | ExecutionException | CancellationException e) {
+                    free();
+                    return;
                 }
                 loader = null;
             }
         } else {
-            // Start thread
             loader = pool.submit(() -> {
                 VertexBuffer vb = buffer.get();
-                this.length = vb.data.length / (vb.stride);
+                this.length = vb.data.length / vb.stride;
                 this.vbInfo = new VertexBuffer(0, vb.hasNormals);
+
                 FloatBuffer buffer = BufferUtils.createFloatBuffer(vb.data.length);
                 buffer.put(vb.data);
                 buffer.position(0);
@@ -128,12 +146,18 @@ public class VBO {
         private final RenderState state;
 
         public boolean isLoaded() {
-            return vbo != -1;
+            return !freed && vbo != -1;
         }
 
 
         protected Binding(RenderState state, boolean wait) {
             lastUsed = System.currentTimeMillis();
+
+            if (freed) {
+                restore = () -> {};
+                this.state = null;
+                return;
+            }
 
             if (!isLoaded()) {
                 init();
@@ -317,11 +341,26 @@ public class VBO {
      */
     public void free() {
         synchronized (vbos) {
-            if (vbo != -1) {
-                GL32.glDeleteBuffers(vbo);
-                GL32.glDeleteVertexArrays(vao);
-                vbo = -1;
-            }
+            vbos.remove(this);
         }
+
+        Future<FloatBuffer> f = this.loader;
+        if (f != null) {
+            f.cancel(true);
+            this.loader = null;
+        }
+
+        if (vbo != -1) {
+            GL32.glDeleteBuffers(vbo);
+            vbo = -1;
+        }
+        if (vao != -1) {
+            GL32.glDeleteVertexArrays(vao);
+            vao = -1;
+        }
+
+        length = 0;
+        vbInfo = null;
+        freed = true;
     }
 }
