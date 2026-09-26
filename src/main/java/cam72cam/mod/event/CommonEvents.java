@@ -86,13 +86,17 @@ public class CommonEvents {
 
         @SubscribeEvent
         public static void onWorldUnload(WorldEvent.Unload event) {
-            World.UNLOAD.execute(x -> x.accept(event.getWorld()));
             if (!event.getWorld().isRemote) {
-                WorldData.UNLOAD.execute(x -> x.accept(
-                        cam72cam.mod.world.World.get(event.getWorld()),
-                        event.getWorld().getSaveHandler().getWorldDirectory()
-                ));
+                cam72cam.mod.world.World umcWorld = cam72cam.mod.world.World.get(event.getWorld());
+                if (umcWorld != null) {
+                    WorldData.UNLOAD.execute(x -> x.accept(
+                            umcWorld,
+                            event.getWorld().getSaveHandler().getWorldDirectory()
+                    ));
+                }
             }
+            // no code will use get()
+            World.UNLOAD.execute(x -> x.accept(event.getWorld()));
         }
 
         @SubscribeEvent

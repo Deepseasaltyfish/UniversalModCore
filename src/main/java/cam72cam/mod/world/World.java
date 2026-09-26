@@ -89,12 +89,12 @@ public class World {
         //HACK for fake world created by other mods
         if(world.isRemote && world instanceof WorldClient
                 && (((WorldClient) world).connection == null
-                    || ((WorldClient)world).connection.getClass() != NetHandlerPlayClient.class)){ //Essentials use their own fakeNetHandler
-            //Meaning it is a "fake world" created by other mods for rendering
+                || ((WorldClient)world).connection.getClass() != NetHandlerPlayClient.class)){
             return;
         }
 
-        if (getWorld(world) == null) {
+        World existing = getWorld(world);
+        if (existing == null || existing.internal != world) {
             World worldWrap = new World(world);
             getWorldMap(world).put(worldWrap.getId(), worldWrap);
             world.addEventListener(new WorldEventListener(worldWrap));
@@ -105,7 +105,14 @@ public class World {
     public static void registerEvents() {
         CommonEvents.World.LOAD.subscribe(World::loadWorld);
 
-        CommonEvents.World.UNLOAD.subscribe(world -> getWorldMap(world).remove(world.provider.getDimension()));
+        CommonEvents.World.UNLOAD.subscribe(world -> {
+            World removed = getWorldMap(world).remove(world.provider.getDimension());
+            if (removed != null) {
+                removed.entityByID.clear();
+                removed.entityByUUID.clear();
+                removed.entitiesByClass.clear();
+            }
+        });
 
         CommonEvents.World.TICK.subscribe(world -> onTicks.forEach(fn -> fn.accept(get(world))));
 
