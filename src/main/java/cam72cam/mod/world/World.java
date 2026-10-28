@@ -212,6 +212,10 @@ public class World {
         entitiesByClass.get(entity.getClass()).add(entity);
         entityByID.put(entityIn.getEntityId(), entity);
         entityByUUID.put(entity.getUUID(), entity);
+
+        for (EntityLifecycleListener l : lifecycleListeners) {
+            try { l.onEntityAdded(entityIn); } catch (Exception e) { ModCore.catching(e); }
+        }
     }
 
     /**
@@ -230,6 +234,10 @@ public class World {
         entityByUUID.remove(entity.getUniqueID());
         if (entity instanceof ModdedEntity){
             tracker.leave((ModdedEntity) entity);
+        }
+
+        for (EntityLifecycleListener l : lifecycleListeners) {
+            try { l.onEntityRemoved(entity); } catch (Exception e) { ModCore.catching(e); }
         }
     }
 
@@ -256,14 +264,20 @@ public class World {
     /** Find UMC entity by MC Entity, assuming type */
     public <T extends Entity> T getEntity(UUID id, Class<T> type) {
         Entity ent = entityByUUID.get(id);
-        if (ent == null) {
-            return null;
+        if (ent == null && offlineEntityLookup != null) {
+            ent = offlineEntityLookup.apply(id);   // ← 新增
         }
+        if (ent == null) return null;
         if (!type.isInstance(ent)) {
             ModCore.warn("When looking for entity %s by id %s, we instead got a %s", type, id, ent.getClass());
             return null;
         }
         return (T) ent;
+    }
+
+    // cam72cam.mod.world.World
+    public ModdedEntity createModdedEntity() {
+        return new ModdedEntity(internal);
     }
 
     /** Find UMC entities by type */
@@ -753,5 +767,23 @@ public class World {
 
     public float getSkyLightLevel(Vec3i pos) {
         return internal.getLightFor(EnumSkyBlock.SKY, pos.internal()) / 15f;
+    }
+
+    // ── 在 World 类里新增 ──
+
+    public interface EntityLifecycleListener {
+        void onEntityAdded(net.minecraft.entity.Entity entity);
+        void onEntityRemoved(net.minecraft.entity.Entity entity);
+    }
+
+    private static final List<EntityLifecycleListener> lifecycleListeners = new ArrayList<>();
+    private static java.util.function.Function<UUID, Entity> offlineEntityLookup = null;
+
+    public static void registerLifecycleListener(EntityLifecycleListener listener) {
+        lifecycleListeners.add(listener);
+    }
+
+    public static void registerOfflineEntityLookup(java.util.function.Function<UUID, Entity> lookup) {
+        offlineEntityLookup = lookup;
     }
 }
