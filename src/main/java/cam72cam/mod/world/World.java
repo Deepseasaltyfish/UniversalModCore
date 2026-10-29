@@ -264,14 +264,12 @@ public class World {
     /** Find UMC entity by MC Entity, assuming type */
     public <T extends Entity> T getEntity(UUID id, Class<T> type) {
         Entity ent = entityByUUID.get(id);
-        if (ent == null && offlineEntityLookup != null) {
-            ent = offlineEntityLookup.apply(id);   // ← 新增
+        if (ent == null) {
+            CustomEntity offline = EntityPool.lookupOfflineEntity(id); // 【改为直接调 UMC 池】
+            if (offline != null) ent = offline;
         }
         if (ent == null) return null;
-        if (!type.isInstance(ent)) {
-            ModCore.warn("When looking for entity %s by id %s, we instead got a %s", type, id, ent.getClass());
-            return null;
-        }
+        if (!type.isInstance(ent)) return null;
         return (T) ent;
     }
 
@@ -777,13 +775,8 @@ public class World {
     }
 
     private static final List<EntityLifecycleListener> lifecycleListeners = new ArrayList<>();
-    private static java.util.function.Function<UUID, Entity> offlineEntityLookup = null;
 
     public static void registerLifecycleListener(EntityLifecycleListener listener) {
         lifecycleListeners.add(listener);
-    }
-
-    public static void registerOfflineEntityLookup(java.util.function.Function<UUID, Entity> lookup) {
-        offlineEntityLookup = lookup;
     }
 }
