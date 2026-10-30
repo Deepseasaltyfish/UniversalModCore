@@ -185,14 +185,27 @@ public class EntityPool {
         }
     }
 
-    private void spawn(ModdedEntity e) {
+    // 提取一个公共方法
+    private void ensureChunkLoaded(ModdedEntity e, boolean longTermProtect) {
+        int chunkX = ((int) Math.floor(e.posX)) >> 4;
+        int chunkZ = ((int) Math.floor(e.posZ)) >> 4;
+
+        // 1. 确保区块在内存里
+        e.world.getChunk(chunkX, chunkZ);
+
+        // 2. 如果是在关池子时的批量强退，必须给它加个锁，防止秒卸载
+        if (longTermProtect) {
+            world.keepLoaded(new Vec3i(chunkX << 4, 0, chunkZ << 4));
+        }
+    }
+
+    public void spawn(ModdedEntity e) {
         e.isDead = false;
         if (!e.isAddedToChunk()) {
-            if (!world.isBlockLoaded(new Vec3i(e.chunkCoordX << 4, 0, e.chunkCoordZ << 4))) {
-                e.world.getChunk(e.chunkCoordX, e.chunkCoordZ);
-            }
-
+            // 正常上线：需要加载，但不需要强行锁
+            ensureChunkLoaded(e, false);
             world.internal.spawnEntity(e);
+            world.registerEntity(e.getSelf());
         }
     }
 
@@ -201,9 +214,11 @@ public class EntityPool {
         for (ModdedEntity e : new ArrayList<>(all.values())) {
             e.isDead = false;
             if (!e.isAddedToChunk()) {
-                e.world.getChunk(e.chunkCoordX, e.chunkCoordZ);
-                world.keepLoaded(new Vec3i(e.chunkCoordX << 4, 0, e.chunkCoordZ << 4));
-                e.world.spawnEntity(e);
+                // 关池子强退：必须加载 + 锁住几秒
+                ensureChunkLoaded(e, true);
+                world.internal.spawnEntity(e);
+                world.registerEntity(e.getSelf());
+
             }
         }
         all.clear();
