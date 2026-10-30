@@ -344,6 +344,14 @@ public class World {
         ChunkManager.flagEntityPos(this, pos);
     }
 
+    /** Force load a chunk */
+    public void forceLoadChunkAt(Vec3i pos) {
+        if (this.isServer) {
+            // 调用原生的 getChunk，传入 true 标志位，如果区块没加载会立刻从磁盘同步读取
+            internal.getChunk(pos.x >> 4, pos.z >> 4);
+        }
+    }
+
     /** Internal, do not use */
     public <T extends net.minecraft.tileentity.TileEntity> T getTileEntity(Vec3i pos, Class<T> cls) {
         return getTileEntity(pos, cls, true);
