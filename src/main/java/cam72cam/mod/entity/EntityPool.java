@@ -102,7 +102,7 @@ public class EntityPool {
     }
 
     private void add(ModdedEntity e) {
-        if (policy == null || !policy.isEnabled()) return;
+        if (policy == null) return;
         if (policy.shouldPool(e.getSelf())) {
             UUID uuid = e.getPersistentID();
             ModdedEntity existing = all.put(uuid, e);
@@ -205,7 +205,6 @@ public class EntityPool {
             // 正常上线：需要加载，但不需要强行锁
             ensureChunkLoaded(e, false);
             world.internal.spawnEntity(e);
-            world.registerEntity(e.getSelf());
         }
     }
 
@@ -217,8 +216,6 @@ public class EntityPool {
                 // 关池子强退：必须加载 + 锁住几秒
                 ensureChunkLoaded(e, true);
                 world.internal.spawnEntity(e);
-                world.registerEntity(e.getSelf());
-
             }
         }
         all.clear();

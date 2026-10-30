@@ -185,12 +185,6 @@ public class World {
 
     /* Event Methods */
 
-    public void registerEntity(Entity entity) {
-        if (isServer) {
-            onEntityAdded(entity.internal);
-        }
-    }
-
     /**
      * Handle tracking entities that have been added to the internal world.
      * Wiring from WorldEventListener
