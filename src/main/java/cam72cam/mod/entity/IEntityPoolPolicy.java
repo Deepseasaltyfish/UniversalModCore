@@ -18,4 +18,7 @@ public interface IEntityPoolPolicy {
 
     /** 扫描间隔（tick） */
     int getProximityInterval();
+
+    /** 当实体被 spawn 进入世界，或者刚被加载时调用 */
+    default void onEntitySpawned(ModdedEntity e) {}
 }

@@ -104,7 +104,13 @@ public class EntityPool {
     private void add(ModdedEntity e) {
         if (policy == null || !policy.isEnabled()) return;
         if (policy.shouldPool(e.getSelf())) {
-            all.put(e.getPersistentID(), e);
+            UUID uuid = e.getPersistentID();
+            ModdedEntity existing = all.put(uuid, e);
+
+            // 【新增】：如果这是一个重新回到世界的实体，触发策略回调
+            if (existing != e && e.isAddedToChunk()) {
+                policy.onEntitySpawned(e);
+            }
         }
     }
 
@@ -115,7 +121,7 @@ public class EntityPool {
     private void tick() {
         // 1. 手动 tick 离线实体
         for (ModdedEntity e : all.values()) {
-            if (!e.addedToChunk && !e.isDead) {
+            if (!e.isAddedToChunk() && !e.isDead) {
                 try {
                     e.onUpdate();
                 } catch (Exception ex) {
@@ -147,7 +153,7 @@ public class EntityPool {
 
             double distSq = nearestPlayerDistSq(players, new Vec3d(e.getPositionVector()));
 
-            if (e.addedToChunk) {
+            if (e.isAddedToChunk()) {
                 if (distSq > policy.getDespawnDistanceSq()) despawn(e);
             } else {
                 if (distSq < policy.getSpawnDistanceSq()) spawn(e);
@@ -169,8 +175,8 @@ public class EntityPool {
         activelyDespawning.add(uuid);
         try {
             world.internal.removeEntityDangerously(e);
-            if (e.addedToChunk) {
-                e.addedToChunk = false;
+            if (e.isAddedToChunk()) {
+                e.setAddedToChunk(false);
                 world.internal.loadedEntityList.remove(e);
             }
             e.isDead = false;
@@ -181,7 +187,11 @@ public class EntityPool {
 
     private void spawn(ModdedEntity e) {
         e.isDead = false;
-        if (!e.addedToChunk) {
+        if (!e.isAddedToChunk()) {
+            if (!world.isBlockLoaded(new Vec3i(e.chunkCoordX << 4, 0, e.chunkCoordZ << 4))) {
+                e.world.getChunk(e.chunkCoordX, e.chunkCoordZ);
+            }
+
             world.internal.spawnEntity(e);
         }
     }
@@ -190,7 +200,7 @@ public class EntityPool {
         if (all.isEmpty()) return;
         for (ModdedEntity e : new ArrayList<>(all.values())) {
             e.isDead = false;
-            if (!e.addedToChunk) {
+            if (!e.isAddedToChunk()) {
                 e.world.getChunk(e.chunkCoordX, e.chunkCoordZ);
                 world.keepLoaded(new Vec3i(e.chunkCoordX << 4, 0, e.chunkCoordZ << 4));
                 e.world.spawnEntity(e);
@@ -211,7 +221,7 @@ public class EntityPool {
     public ModdedEntity createFromTagCompound(TagCompound data) {
         ModdedEntity e = world.createModdedEntity();
         e.deserializeFromTagCompound(data);
-        e.addedToChunk = false;
+        e.setAddedToChunk(false);
         e.isDead = false;
         add(e);
         return e;

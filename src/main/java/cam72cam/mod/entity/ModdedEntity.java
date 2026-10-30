@@ -657,4 +657,12 @@ public class ModdedEntity extends Entity implements IEntityAdditionalSpawnData {
     public void deserializeFromTagCompound(TagCompound data) {
         readFromNBT(data.internal);  // public，MC 的 Entity.readFromNBT
     }
+
+    public boolean isAddedToChunk() {
+        return this.addedToChunk;
+    }
+
+    public void setAddedToChunk(boolean added) {
+        this.addedToChunk = added;
+    }
 }

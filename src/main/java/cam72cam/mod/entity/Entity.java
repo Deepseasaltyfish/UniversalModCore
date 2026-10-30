@@ -282,4 +282,16 @@ public class Entity {
     public int getId() {
         return internal.getEntityId();
     }
+
+    // 在 Entity 类里添加：
+
+    /** 当前实体是否已被加入世界（区块加载状态） */
+    public boolean isAddedToChunk() {
+        return internal.addedToChunk;
+    }
+
+    /** 强行设置实体的区块加载状态（仅供底层实体池使用） */
+    public void setAddedToChunk(boolean added) {
+        internal.addedToChunk = added;
+    }
 }
