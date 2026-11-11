@@ -85,6 +85,33 @@ public class ModdedEntity extends Entity implements IEntityWithComplexSpawn {
         iCollision = ICollision.get(self);
     }
 
+    /**
+     * 从已有 CustomEntity 创建 ModdedEntity（不创建新 CustomEntity）。
+     * 用于 EntityPool 在进出世界时销毁重建 ModdedEntity 对象，
+     * 绕过 1.21 PersistentEntitySectionManager / ChunkMap 对同一对象的残留状态。
+     */
+    public ModdedEntity(EntityType type, Level world, CustomEntity self) {
+        super(type, world);
+        super.blocksBuilding = true;
+        this.self = self;
+        self.setup(this);
+        iWorldData = IWorldData.get(self);
+        iTickable = ITickable.get(self);
+        iClickable = IClickable.get(self);
+        iKillable = IKillable.get(self);
+        iRidable = IRidable.get(self);
+        iCollision = ICollision.get(self);
+    }
+
+    /**
+     * 离线 tick：只跑 IR 逻辑链，不碰 sync 发包、乘客、dataManager。
+     * 由 EntityPool.tick 对孤儿 ModdedEntity 调用。
+     */
+    public void offlineTick() {
+        this.tickCount++;
+        iTickable.onTick();
+    }
+
     public UUID getUUID() {
         return super.getUUID();
     }
@@ -252,6 +279,10 @@ public class ModdedEntity extends Entity implements IEntityWithComplexSpawn {
      */
     @Override
     public final void tick() {
+        // 资源包缺失等拒绝加入的实体不 tick，防止 getDefinition() 崩客户端
+        if (refusedToJoin != null) return;
+        if (self == null) return;
+
         if (!level().isClientSide()) {
             this.getEntityData().set(PREV_ROLL, getEntityData().get(ROLL));
         }

@@ -4,15 +4,20 @@ import cam72cam.mod.ModCore;
 import cam72cam.mod.math.Vec3d;
 import cam72cam.mod.serialization.TagCompound;
 import cam72cam.mod.world.World;
-import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
-import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.Entity.RemovalReason;
-import net.minecraft.world.level.entity.PersistentEntitySectionManager;
+import net.minecraft.world.entity.EntityType;
 
 import java.util.*;
 
+/**
+ * 离线实体池：让车辆类实体脱离 MC 区块 tick 独立运行。
+ *
+ * 核心思路（Create 式）：
+ *   - Simulation 通过 CustomEntity 驱动逻辑，不依赖 ModdedEntity 是否在世界里
+ *   - ModdedEntity 只是"临时躯壳"，进出世界时全部销毁重建，绕过 1.21 状态机残留
+ *   - 每个 UUID 在池里始终关联一个 ModdedEntity（在线或孤儿），Simulation / 持久化都不用改
+ */
 public class EntityPool {
     private static final Map<World, EntityPool> INSTANCES = new HashMap<>();
     private static IEntityPoolPolicy policy = null;
@@ -35,6 +40,8 @@ public class EntityPool {
 
                 ModdedEntity existing = pool.all.get(uuid);
                 if (existing != null && existing != me) {
+                    // 世界里来了一个 me（.mca 加载或 addFreshEntity 成功），
+                    // 池里有 existing（孤儿）。让 me 接管，existing 丢弃。
                     final TagCompound mergedData;
                     try {
                         mergedData = existing.serializeToTagCompound();
@@ -85,7 +92,7 @@ public class EntityPool {
                 ModdedEntity current = pool.all.get(uuid);
                 if (current != me) return;
 
-                if (me.isRemoved() && me.getRemovalReason() != RemovalReason.UNLOADED_TO_CHUNK) {
+                if (me.isRemoved()) {
                     pool.all.remove(uuid);
                 } else {
                     me.setAddedToChunk(false);
@@ -134,10 +141,11 @@ public class EntityPool {
     }
 
     private void tick() {
+        // 只 tick 孤儿 ModdedEntity（不在世界里的），用 offlineTick 绕过 sync/乘客/dataManager
         for (ModdedEntity e : all.values()) {
             if (!e.isAddedToChunk() && !e.isRemoved()) {
                 try {
-                    e.tick();
+                    e.offlineTick();
                 } catch (Exception ex) {
                     ModCore.catching(ex, "Offline tick failed for %s", e.getUUID());
                 }
@@ -186,61 +194,112 @@ public class EntityPool {
     }
 
     /**
-     * 将实体从 MC 世界移除，但保留在池中（转离线状态）。
-     * 不能走 e.remove()：它会把 isRemoved 置 true，pool.tick 和 checkProximity 都会跳过，
-     * Simulation 不再驱动该车，地图也看不到。
-     * 正确做法：清三层注册表（ChunkMap 追踪 / EntityLookup 实体存储 / knownUuids UUID 登记），
-     * 但保持 isRemoved = false，让实体继续被池子 tick。
+     * 车离开视野：销毁当前 ModdedEntity，用它的完整 NBT 重建一个孤儿 ModdedEntity，
+     * 让 CustomEntity.internal 指向新孤儿。Simulation 通过 CustomEntity 继续驱动。
+     *
+     * 关键：新孤儿从未进入过世界，1.21 状态机对它无任何记录。
      */
-    private void despawn(ModdedEntity e) {
-        if (!e.isAddedToChunk()) return;
-        if (!(e.level() instanceof ServerLevel sl)) return;
+    private void despawn(ModdedEntity real) {
+        if (!real.isAddedToChunk()) return;
+        if (!(real.level() instanceof ServerLevel sl)) return;
 
-        UUID uuid = e.getUUID();
+        UUID uuid = real.getUUID();
         activelyDespawning.add(uuid);
+        // despawn 里，在 activelyDespawning.add 之后
+        if (real.getPassengerCount() > 0) {
+            ModCore.warn("[POOL] despawn %s: still has passengers, skipping", uuid);
+            return;
+        }
         try {
-            // 1. 清 ChunkMap 追踪层（客户端收到 remove 包）
-            sl.getChunkSource().removeEntity(e);
-            // 2. 清 EntityLookup.byUuid/byId（下次 addFreshEntity 不会 Duplicate entity UUID）
-            sl.entityManager.visibleEntityStorage.remove(e);
-            // 3. 清 knownUuids
+            CustomEntity self = real.getSelf();
+            if (self == null) {
+                ModCore.warn("[POOL] despawn %s: self is null", uuid);
+                real.setAddedToChunk(false);
+                return;
+            }
+
+            // 1. 完整序列化当前 ModdedEntity 状态
+            TagCompound data;
+            try {
+                data = real.serializeToTagCompound();
+            } catch (Exception ex) {
+                ModCore.catching(ex, "despawn %s: serialize failed", uuid);
+                real.setAddedToChunk(false);
+                return;
+            }
+
+            // 2. 从世界移除
+            sl.getChunkSource().removeEntity(real);
             sl.entityManager.knownUuids.remove(uuid);
-            // 4. 标记离线，isRemoved 保持 false，让池子继续 tick
-            e.setAddedToChunk(false);
+
+            // 3. 销毁旧 ModdedEntity（不在世界时 discard 是 no-op，但保险起见）
+            real.discard();
+
+            // 4. 创建全新的孤儿 ModdedEntity（不调 addFreshEntity）
+            EntityType type = real.getType();
+            ModdedEntity orphan = new ModdedEntity(type, real.level(), self);
+            orphan.deserializeFromTagCompound(data);
+            orphan.setAddedToChunk(false);
+
+            // 5. 池里替换
+            all.put(uuid, orphan);
+            spawnFailures.remove(uuid);
+        } catch (Exception ex) {
+            ModCore.catching(ex, "despawn failed for %s", uuid);
         } finally {
             activelyDespawning.remove(uuid);
         }
     }
 
-    private void spawn(ModdedEntity e) {
-        if (e.isAddedToChunk()) return;
-        if (!(e.level() instanceof ServerLevel sl)) return;
+    /**
+     * 车进入视野：销毁孤儿 ModdedEntity，用它的完整 NBT 重建一个全新的真实 ModdedEntity，
+     * 然后 addFreshEntity。新对象从未被 1.21 状态机见过，必然走完整首次注册。
+     */
+    private final Map<UUID, Integer> spawnFailures = new HashMap<>();
+    private static final int MAX_SPAWN_FAILURES = 10;
 
-        ensureChunkLoaded(e);
+    private void spawn(ModdedEntity orphan) {
+        if (orphan.isAddedToChunk()) return;
+        if (!(orphan.level() instanceof ServerLevel sl)) return;
 
-        // 世界中已有同 UUID 实体（.mca 加载的），合并数据进它，不重复添加
-        Entity worldEntity = sl.getEntity(e.getUUID());
-        if (worldEntity instanceof ModdedEntity existing) {
-            try {
-                TagCompound data = e.serializeToTagCompound();
-                existing.deserializeFromTagCompound(data);
-            } catch (Exception ex) {
-                ModCore.catching(ex, "Failed to merge data into world entity %s", e.getUUID());
-            }
-            existing.setAddedToChunk(true);
-            all.put(e.getUUID(), existing);
+        UUID uuid = orphan.getUUID();
+
+        int failures = spawnFailures.getOrDefault(uuid, 0);
+        if (failures >= MAX_SPAWN_FAILURES) {
+            // 已经反复失败，保持孤儿状态不动，等下一次世界重载或人工介入
             return;
         }
 
-        // 世界中没有，正常添加
-        e.revive();
-        removeFromKnownUuids(sl, e.getUUID());
-        removeFromChunkMap(sl, e.getId());
+        CustomEntity self = orphan.getSelf();
+        if (self == null) {
+            ModCore.warn("[POOL] spawn %s: self is null", uuid);
+            return;
+        }
 
-        if (!sl.addFreshEntity(e)) {
-            PersistentEntitySectionManager<Entity> manager = sl.entityManager;
-            boolean stillKnown = manager.knownUuids.contains(e.getUUID());
-            ModCore.warn("[POOL] addFreshEntity failed for %s. knownUuids.contains=%s", e.getUUID(), stillKnown);
+        ensureChunkLoaded(orphan);
+
+        TagCompound data;
+        try {
+            data = orphan.serializeToTagCompound();
+        } catch (Exception ex) {
+            ModCore.catching(ex, "spawn %s: serialize failed", uuid);
+            return;
+        }
+
+        EntityType type = orphan.getType();
+        ModdedEntity real = new ModdedEntity(type, orphan.level(), self);
+        real.deserializeFromTagCompound(data);
+
+        all.put(uuid, real);
+        orphan.discard();
+
+        if (!sl.addFreshEntity(real)) {
+            spawnFailures.put(uuid, failures + 1);
+            boolean stillKnown = sl.entityManager.knownUuids.contains(uuid);
+            ModCore.warn("[POOL] addFreshEntity failed for %s (attempt %d/%d). knownUuids.contains=%s",
+                    uuid, failures + 1, MAX_SPAWN_FAILURES, stillKnown);
+        } else {
+            spawnFailures.remove(uuid);
         }
     }
 
@@ -250,41 +309,14 @@ public class EntityPool {
         e.level().getChunk(chunkX, chunkZ);
     }
 
-    private static void removeFromKnownUuids(ServerLevel level, UUID uuid) {
-        try {
-            PersistentEntitySectionManager<Entity> manager = level.entityManager;
-            if (manager != null && manager.knownUuids != null) {
-                manager.knownUuids.remove(uuid);
-            }
-        } catch (Exception ex) {
-            ModCore.warn("[POOL] Failed to remove uuid from knownUuids: %s", ex.getMessage());
-        }
-    }
-
-    private static void removeFromChunkMap(ServerLevel level, int entityId) {
-        try {
-            ChunkMap chunkMap = level.getChunkSource().chunkMap;
-            Int2ObjectMap<Object> map = (Int2ObjectMap<Object>) (Int2ObjectMap<?>) chunkMap.entityMap;
-            if (map != null) {
-                map.remove(entityId);
-            }
-        } catch (Exception ex) {
-            ModCore.warn("[POOL] Failed to remove entity id %d from ChunkMap.entityMap: %s", entityId, ex.getMessage());
-        }
-    }
-
     private void flushAndDisable() {
         if (all.isEmpty()) return;
         for (ModdedEntity e : new ArrayList<>(all.values())) {
             if (!e.isAddedToChunk() && !e.isRemoved()) {
-                ensureChunkLoaded(e);
-                if (e.level() instanceof ServerLevel sl) {
-                    e.revive();
-                    removeFromKnownUuids(sl, e.getUUID());
-                    removeFromChunkMap(sl, e.getId());
-                    if (sl.addFreshEntity(e)) {
-                        e.setAddedToChunk(true);
-                    }
+                try {
+                    spawn(e);
+                } catch (Exception ex) {
+                    ModCore.catching(ex, "flushAndDisable failed for %s", e.getUUID());
                 }
             }
         }
@@ -300,6 +332,11 @@ public class EntityPool {
         return all.get(uuid);
     }
 
+    /**
+     * 从持久化数据恢复实体。
+     * 如果世界已有同 UUID 的实体（.mca 加载），合并数据进它。
+     * 否则创建一个孤儿 ModdedEntity（不 addFreshEntity），由 pool.tick 驱动。
+     */
     public ModdedEntity createFromTagCompound(TagCompound data) {
         UUID uuid = data.internal.contains("UUID") ? data.internal.getUUID("UUID") : null;
         if (uuid != null && world.internal instanceof ServerLevel sl) {
