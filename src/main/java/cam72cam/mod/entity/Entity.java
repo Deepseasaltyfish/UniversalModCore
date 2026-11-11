@@ -25,6 +25,18 @@ public class Entity {
     /** The wrapped MC construct.  Do not use directly */
     public net.minecraft.world.entity.Entity internal;
 
+    private boolean addedToChunk = false;
+
+    /** Whether the current entity is added to the world (chunk loaded state). */
+    public boolean isAddedToChunk() {
+        return addedToChunk;
+    }
+
+    /** Forcefully sets the chunk loaded state of the entity (only for internal entity pool use). */
+    public void setAddedToChunk(boolean added) {
+        this.addedToChunk = added;
+    }
+
     /** Wrap a MC entity in UMC entity.  Do not use directly. */
     public Entity(net.minecraft.world.entity.Entity entity) {
         this.internal = entity;

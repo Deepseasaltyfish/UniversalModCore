@@ -63,4 +63,14 @@ public class MinecraftClient {
     public static boolean isPaused() {
         return Minecraft.getInstance().isPaused();
     }
+
+    /** Send a command as a local player (automatically strips the leading '/') */
+    public static void sendChatMessage(String message) {
+        if (Minecraft.getInstance().player != null && message != null) {
+            if (message.startsWith("/")) {
+                message = message.substring(1);
+            }
+            Minecraft.getInstance().player.connection.sendCommand(message);
+        }
+    }
 }

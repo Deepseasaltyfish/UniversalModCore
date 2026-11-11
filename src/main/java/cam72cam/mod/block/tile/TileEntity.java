@@ -28,6 +28,7 @@ import net.minecraft.network.Connection;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.EntityBlock;
@@ -74,6 +75,9 @@ public class TileEntity extends net.minecraft.world.level.block.entity.BlockEnti
     // Set during initialization
     private final BlockEntity instance;
     public boolean hasTileData;
+
+    private boolean pendingInstanceLoad = false;
+    private TagCompound pendingInstanceData = null;
 
     // Cached
     private Vec3i umcPos;
@@ -230,11 +234,42 @@ public class TileEntity extends net.minecraft.world.level.block.entity.BlockEnti
 
         try {
             TagSerializer.deserialize(instanceData, instance);
-            instance.load(instanceData);
+            if (level != null) {
+                // 正常区块加载路径：level 已设好，立即 load
+                instance.load(instanceData);
+            } else {
+                // loadStatic 路径：level 还没设，延后
+                pendingInstanceLoad = true;
+                pendingInstanceData = instanceData;
+            }
         } catch (SerializationException e) {
             // TODO how should we handle this?
             throw new RuntimeException(e);
         }
+    }
+
+    private void flushPendingLoad() {
+        if (!pendingInstanceLoad) return;
+        if (level == null) return;   // setLevel(null) 期间不清标志
+        try {
+            instance.load(pendingInstanceData);
+        } catch (SerializationException e) {
+            throw new RuntimeException(e);
+        }
+        pendingInstanceLoad = false;
+        pendingInstanceData = null;
+    }
+
+    @Override
+    public void setLevel(Level level) {
+        super.setLevel(level);
+        flushPendingLoad();
+    }
+
+    @Override
+    public void onLoad() {
+        super.onLoad();
+        flushPendingLoad();
     }
 
     /**

@@ -87,6 +87,19 @@ public class EntityRegistry {
         });
     }
 
+    public static EntityType<? extends ModdedEntity> typeFromId(String id) {
+        for (Map.Entry<Class<? extends CustomEntity>, EntityType<? extends ModdedEntity>> entry : registered.entrySet()) {
+            if (entry.getValue().builtInRegistryHolder().key().location().toString().equals(id)) {
+                return entry.getValue();
+            }
+        }
+        return null;
+    }
+
+    public static Supplier<CustomEntity> getSupplierFromId(String id) {
+        return constructors.get(id);
+    }
+
     @OnlyIn(Dist.CLIENT)
     public static void registerClientEvents() {
         ClientEvents.TICK.subscribe(() -> {

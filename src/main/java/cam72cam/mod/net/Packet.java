@@ -53,6 +53,8 @@ public abstract class Packet {
     @TagField("umcWorld")
     private World world;
 
+    protected byte[] raw;
+
     /** How to register a packet (do in CONSTRUCT phase) */
     public static void register(Supplier<Packet> sup, PacketDirection dir) {
         String pktClass = sup.get().getClass().toString();
@@ -106,6 +108,7 @@ public abstract class Packet {
                  InvocationTargetException | NoSuchMethodException e) {
             throw new RuntimeException(e);
         }
+        newPacket.raw = msg.packet.raw;
         return newPacket;
     }
 
@@ -166,8 +169,17 @@ public abstract class Packet {
 
         public static StreamCodec<FriendlyByteBuf, Message> codec = StreamCodec.composite(
                 ByteBufCodecs.COMPOUND_TAG, Message::write,
+                ByteBufCodecs.BYTE_ARRAY, Message::writeRaw,
                 Message::new
         );
+
+        public Message(CompoundTag buff, byte[] raw) {
+            fromTag(buff);
+            if (raw != null && raw.length > 0) {
+                this.packet.raw = raw;
+            }
+            initLocation();
+        }
 
         public Message(Packet pkt) {
             this.packet = pkt;
@@ -202,6 +214,10 @@ public abstract class Packet {
 
         public static CompoundTag write(Message message) {
             return message.packet.data.internal;
+        }
+
+        public static byte[] writeRaw(Message message) {
+            return message.packet.raw != null ? message.packet.raw : new byte[0];
         }
 
         @Override

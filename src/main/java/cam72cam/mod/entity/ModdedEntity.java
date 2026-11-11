@@ -85,6 +85,10 @@ public class ModdedEntity extends Entity implements IEntityWithComplexSpawn {
         iCollision = ICollision.get(self);
     }
 
+    public UUID getUUID() {
+        return super.getUUID();
+    }
+
     private final SingleCache<IBoundingBox, AABB> cachedCollisionBB = new SingleCache<>(BoundingBox::from);
     private final SingleCache<IBoundingBox, AABB> cachedRenderBB = new SingleCache<>(internal -> {
         AABB bb = BoundingBox.from(internal);
@@ -181,6 +185,7 @@ public class ModdedEntity extends Entity implements IEntityWithComplexSpawn {
      * @see #load
      */
     private void save(TagCompound data) {
+        data.setString("id", BuiltInRegistries.ENTITY_TYPE.getKey(getType()).toString());
         this.roll = getEntityData().get(ROLL);
         this.prevRoll = getEntityData().get(PREV_ROLL);
 
@@ -250,6 +255,7 @@ public class ModdedEntity extends Entity implements IEntityWithComplexSpawn {
         if (!level().isClientSide()) {
             this.getEntityData().set(PREV_ROLL, getEntityData().get(ROLL));
         }
+        this.tickCount++;
         iTickable.onTick();
         try {
             self.sync.send();
@@ -576,11 +582,10 @@ public class ModdedEntity extends Entity implements IEntityWithComplexSpawn {
     }
 
     private void applySavedVelocity(TagCompound data) {
+        if (!data.hasKey("Motion")) return;
         ListTag vel = data.internal.getList("Motion", 6);
-        double x = vel.getDouble(0);
-        double y = vel.getDouble(1);
-        double z = vel.getDouble(2);
-        super.setDeltaMovement(x, y, z);
+        if (vel.size() < 3) return;
+        super.setDeltaMovement(vel.getDouble(0), vel.getDouble(1), vel.getDouble(2));
     }
 
     /*
@@ -686,4 +691,23 @@ public class ModdedEntity extends Entity implements IEntityWithComplexSpawn {
         return super.getCapability(capability, facing);
     }
      */
+
+    public boolean isAddedToChunk() {
+        return this.self.isAddedToChunk();
+    }
+    public void setAddedToChunk(boolean added) {
+        if (self != null) {
+            self.setAddedToChunk(added);   // 同步 CustomEntity 的父类字段
+        }
+    }
+
+    public TagCompound serializeToTagCompound() {
+        CompoundTag tag = new CompoundTag();
+        this.saveWithoutId(tag);
+        return new TagCompound(tag);
+    }
+
+    public void deserializeFromTagCompound(TagCompound data) {
+        this.load(data.internal);
+    }
 }

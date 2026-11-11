@@ -22,9 +22,6 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.particles.SimpleParticleType;
@@ -32,6 +29,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.damagesource.DamageScaling;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.damagesource.DamageType;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LightLayer;
@@ -50,12 +48,12 @@ import net.neoforged.neoforge.common.SpecialPlantable;
 import net.neoforged.neoforge.fluids.capability.IFluidHandler;
 import net.neoforged.neoforge.items.IItemHandler;
 import net.neoforged.neoforge.items.IItemHandlerModifiable;
-import org.apache.commons.lang3.NotImplementedException;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -205,13 +203,17 @@ public class World {
         return internal.dimension().location().toString();
     }
 
+    public String getStringId() {
+        return getId();
+    }
+
     /* Event Methods */
 
     /**
      * Handle tracking entities that have been added to the internal world.
      * Wiring from WorldEventListener
      */
-    void onEntityAdded(net.minecraft.world.entity.Entity entityIn) {
+    public void onEntityAdded(net.minecraft.world.entity.Entity entityIn) {
         if (entityByID.containsKey(entityIn.getId())) {
             // Dupe
             return;
@@ -234,13 +236,19 @@ public class World {
         entitiesByClass.get(entity.getClass()).add(entity);
         entityByID.put(entityIn.getId(), entity);
         entityByUUID.put(entity.getUUID(), entity);
+
+        entityByUUID.put(entity.getUUID(), entity);
+
+        for (EntityLifecycleListener l : lifecycleListeners) {
+            try { l.onEntityAdded(entityIn); } catch (Exception e) { ModCore.catching(e); }
+        }
     }
 
     /**
      * Handle tracking entities that have been removed from the internal world.
      * Wiring from WorldEventListener
      */
-    void onEntityRemoved(net.minecraft.world.entity.Entity entity) {
+    public void onEntityRemoved(net.minecraft.world.entity.Entity entity) {
         if(entity == null) {
             ModCore.warn("Somehow removed a null entity?");
             return;
@@ -252,6 +260,10 @@ public class World {
         entityByUUID.remove(entity.getUUID());
         if (entity instanceof ModdedEntity){
             tracker.leave((ModdedEntity) entity);
+        }
+
+        for (EntityLifecycleListener l : lifecycleListeners) {
+            try { l.onEntityRemoved(entity); } catch (Exception e) { ModCore.catching(e); }
         }
     }
 
@@ -278,6 +290,10 @@ public class World {
     /** Find UMC entity by MC Entity, assuming type */
     public <T extends Entity> T getEntity(UUID id, Class<T> type) {
         Entity ent = entityByUUID.get(id);
+        if (ent == null) {
+            CustomEntity offline = EntityPool.lookupOfflineEntity(id);
+            if (offline != null) ent = offline;
+        }
         if (ent == null) {
             return null;
         }
@@ -339,6 +355,16 @@ public class World {
                                  .collect(Collectors.toList());
     }
 
+    public ModdedEntity createModdedEntity(TagCompound data) {
+        String idStr = data.getString("id");
+        EntityType<? extends ModdedEntity> type = EntityRegistry.typeFromId(idStr);
+        Supplier<CustomEntity> ctr = EntityRegistry.getSupplierFromId(idStr);
+        if (type == null || ctr == null) {
+            throw new RuntimeException("Cannot create entity from id: " + idStr);
+        }
+        return new ModdedEntity(type, internal, ctr);
+    }
+
     /** Add a constructed entity to the world */
     public boolean spawnEntity(Entity ent) {
         return internal.addFreshEntity(ent.internal);
@@ -352,6 +378,12 @@ public class World {
     /** Force a chunk for up to 5s */
     public void keepLoaded(Vec3i pos) {
         ChunkManager.flagEntityPos(this, pos);
+    }
+
+    public void forceLoadChunkAt(Vec3i pos) {
+        if (this.isServer) {
+            internal.getChunk(pos.x >> 4, pos.z >> 4);
+        }
     }
 
     /** Internal, do not use */
@@ -411,6 +443,7 @@ public class World {
             return null;
         }
         te.setLevel(internal);
+        te.onLoad();
         if (te.instance() == null) {
             ModCore.warn("Loaded " + te.isLoaded() + " " + data);
         }
@@ -791,5 +824,16 @@ public class World {
 
     public float getSkyLightLevel(Vec3i pos) {
         return internal.getBrightness(LightLayer.SKY, pos.internal()) / 15f;
+    }
+
+    public interface EntityLifecycleListener {
+        void onEntityAdded(net.minecraft.world.entity.Entity entity);
+        void onEntityRemoved(net.minecraft.world.entity.Entity entity);
+    }
+
+    private static final List<EntityLifecycleListener> lifecycleListeners = new ArrayList<>();
+
+    public static void registerLifecycleListener(EntityLifecycleListener listener) {
+        lifecycleListeners.add(listener);
     }
 }

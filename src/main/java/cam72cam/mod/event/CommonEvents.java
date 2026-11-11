@@ -1,12 +1,12 @@
 package cam72cam.mod.event;
 
 import cam72cam.mod.ModCore;
+import cam72cam.mod.entity.ModdedEntity;
 import cam72cam.mod.event.platform.RegisterAdvancementEvent;
 import cam72cam.mod.event.platform.RegisterBlockTagEvent;
-import cam72cam.mod.event.platform.RegisterRecipeEvent;
 import cam72cam.mod.event.platform.RegisterItemTagEvent;
+import cam72cam.mod.event.platform.RegisterRecipeEvent;
 import cam72cam.mod.net.Packet;
-import cam72cam.mod.entity.ModdedEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -18,11 +18,13 @@ import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.storage.LevelResource;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
 import net.neoforged.neoforge.event.entity.EntityEvent;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
+import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
@@ -34,6 +36,8 @@ import net.neoforged.neoforge.registries.RegisterEvent;
 import net.neoforged.neoforge.registries.RegisterEvent.RegisterHelper;
 import net.neoforged.neoforge.server.permission.events.PermissionGatherEvent;
 
+import java.io.File;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /** Registry of events that fire off on both client and server.  Do not use directly! */
@@ -50,6 +54,12 @@ public class CommonEvents {
         public static final Event<Consumer<ServerLevel>> SAVE = new Event<>();
         public static final Event<Consumer<Level>> TICK = new Event<>();
         public static final Event<Consumer<ChunkAccess>> LOAD_CHUNK = new Event<>();
+    }
+
+    public static final class WorldData {
+        public static final Event<BiConsumer<cam72cam.mod.world.World, File>> LOAD = new Event<>();
+        public static final Event<BiConsumer<cam72cam.mod.world.World, File>> SAVE = new Event<>();
+        public static final Event<BiConsumer<cam72cam.mod.world.World, File>> UNLOAD = new Event<>();
     }
 
     public static final class Block {
@@ -94,7 +104,22 @@ public class CommonEvents {
         // World
         @SubscribeEvent
         public static void onWorldLoad(LevelEvent.Load event) {
-            World.LOAD.execute(x -> x.accept((Level)event.getLevel()));
+            if (event.getLevel() instanceof ServerLevel serverLevel) {
+                World.LOAD.execute(x -> x.accept(serverLevel));
+
+                File worldDir = serverLevel.getServer().getWorldPath(LevelResource.ROOT).toFile();
+                WorldData.LOAD.execute(x -> x.accept(cam72cam.mod.world.World.get(serverLevel), worldDir));
+            } else {
+                World.LOAD.execute(x -> x.accept((Level) event.getLevel()));
+            }
+        }
+
+        @SubscribeEvent
+        public static void onWorldSave(LevelEvent.Save event) {
+            if (event.getLevel() instanceof ServerLevel serverLevel) {
+                File worldDir = serverLevel.getServer().getWorldPath(LevelResource.ROOT).toFile();
+                WorldData.SAVE.execute(x -> x.accept(cam72cam.mod.world.World.get(serverLevel), worldDir));
+            }
         }
 
         @SubscribeEvent
@@ -109,7 +134,14 @@ public class CommonEvents {
 
         @SubscribeEvent
         public static void onWorldUnload(LevelEvent.Unload event) {
-            World.UNLOAD.execute(x -> x.accept((Level)event.getLevel()));
+            if (event.getLevel() instanceof ServerLevel serverLevel) {
+                cam72cam.mod.world.World umcWorld = cam72cam.mod.world.World.get(serverLevel);
+                if (umcWorld != null) {
+                    File worldDir = serverLevel.getServer().getWorldPath(LevelResource.ROOT).toFile();
+                    WorldData.UNLOAD.execute(x -> x.accept(umcWorld, worldDir));
+                }
+            }
+            World.UNLOAD.execute(x -> x.accept((Level) event.getLevel()));
         }
 
         @SubscribeEvent
@@ -118,6 +150,26 @@ public class CommonEvents {
             //We only want server side
             if (!event.getLevel().isClientSide()) {
                 World.TICK.execute(x -> x.accept(event.getLevel()));
+            }
+        }
+
+        @SubscribeEvent
+        public static void onEntityJoinLevel(EntityJoinLevelEvent event) {
+            if (!Entity.JOIN.executeCancellable(x -> x.onJoin(event.getLevel(), event.getEntity()))) {
+                event.setCanceled(true);
+                return;
+            }
+            cam72cam.mod.world.World umcWorld = cam72cam.mod.world.World.get(event.getLevel());
+            if (umcWorld != null && !event.getLevel().isClientSide()) {
+                umcWorld.onEntityAdded(event.getEntity());
+            }
+        }
+
+        @SubscribeEvent
+        public static void onEntityLeaveLevel(EntityLeaveLevelEvent event) {
+            cam72cam.mod.world.World umcWorld = cam72cam.mod.world.World.get(event.getLevel());
+            if (umcWorld != null && !event.getLevel().isClientSide()) {
+                umcWorld.onEntityRemoved(event.getEntity());
             }
         }
 
