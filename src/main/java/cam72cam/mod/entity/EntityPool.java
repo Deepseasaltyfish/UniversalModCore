@@ -205,12 +205,12 @@ public class EntityPool {
 
         UUID uuid = real.getUUID();
         activelyDespawning.add(uuid);
-        // despawn 里，在 activelyDespawning.add 之后
-        if (real.getPassengerCount() > 0) {
-            ModCore.warn("[POOL] despawn %s: still has passengers, skipping", uuid);
-            return;
-        }
         try {
+            if (real.getPassengerCount() > 0) {
+                ModCore.warn("[POOL] despawn %s: still has passengers, skipping", uuid);
+                return;
+            }
+
             CustomEntity self = real.getSelf();
             if (self == null) {
                 ModCore.warn("[POOL] despawn %s: self is null", uuid);
@@ -218,7 +218,6 @@ public class EntityPool {
                 return;
             }
 
-            // 1. 完整序列化当前 ModdedEntity 状态
             TagCompound data;
             try {
                 data = real.serializeToTagCompound();
@@ -228,20 +227,27 @@ public class EntityPool {
                 return;
             }
 
-            // 2. 从世界移除
+            // 从区块移除（会触发 onTrackingEnd、清 sectionStorage）
             sl.getChunkSource().removeEntity(real);
-            sl.entityManager.knownUuids.remove(uuid);
 
-            // 3. 销毁旧 ModdedEntity（不在世界时 discard 是 no-op，但保险起见）
+            // 强制清理 UUID 注册层。Set.remove 是幂等的，即使不在也不会出问题。
+            boolean knownRemoved = sl.entityManager.knownUuids.remove(uuid);
+
+            // 兜底清理 EntityLookup（幂等，EntityLookup.remove 按 UUID + ID 双删除）
+            sl.entityManager.visibleEntityStorage.remove(real);
+
+            if (!knownRemoved) {
+                // removeEntity 已经清过了，正常路径
+                ModCore.info("[POOL] despawn %s: knownUuids already clean", uuid);
+            }
+
             real.discard();
 
-            // 4. 创建全新的孤儿 ModdedEntity（不调 addFreshEntity）
             EntityType type = real.getType();
             ModdedEntity orphan = new ModdedEntity(type, real.level(), self);
             orphan.deserializeFromTagCompound(data);
             orphan.setAddedToChunk(false);
 
-            // 5. 池里替换
             all.put(uuid, orphan);
             spawnFailures.remove(uuid);
         } catch (Exception ex) {
@@ -266,7 +272,6 @@ public class EntityPool {
 
         int failures = spawnFailures.getOrDefault(uuid, 0);
         if (failures >= MAX_SPAWN_FAILURES) {
-            // 已经反复失败，保持孤儿状态不动，等下一次世界重载或人工介入
             return;
         }
 
@@ -277,6 +282,29 @@ public class EntityPool {
         }
 
         ensureChunkLoaded(orphan);
+
+        // 关键：如果世界里已有同 UUID 实体（.mca 加载的 / 或被 onEntityAdded 接管的），
+        // 走合并路径，不要创建新的 real 去 addFreshEntity（会造成 UUID 冲突）
+        Entity worldEntity = sl.getEntity(uuid);
+        if (worldEntity instanceof ModdedEntity worldMe) {
+            TagCompound mergeData;
+            try {
+                mergeData = orphan.serializeToTagCompound();
+            } catch (Exception ex) {
+                ModCore.catching(ex, "spawn %s: serialize for merge failed", uuid);
+                return;
+            }
+            try {
+                worldMe.deserializeFromTagCompound(mergeData);
+            } catch (Exception ex) {
+                ModCore.catching(ex, "spawn %s: merge into world entity failed", uuid);
+            }
+            worldMe.setAddedToChunk(true);
+            all.put(uuid, worldMe);
+            orphan.discard();
+            spawnFailures.remove(uuid);
+            return;
+        }
 
         TagCompound data;
         try {
@@ -293,14 +321,30 @@ public class EntityPool {
         all.put(uuid, real);
         orphan.discard();
 
-        if (!sl.addFreshEntity(real)) {
-            spawnFailures.put(uuid, failures + 1);
-            boolean stillKnown = sl.entityManager.knownUuids.contains(uuid);
-            ModCore.warn("[POOL] addFreshEntity failed for %s (attempt %d/%d). knownUuids.contains=%s",
-                    uuid, failures + 1, MAX_SPAWN_FAILURES, stillKnown);
-        } else {
+        if (sl.addFreshEntity(real)) {
             spawnFailures.remove(uuid);
+            return;
         }
+
+        // 第一次失败：knownUuids 里可能有幽灵 UUID（despawn 时 removeEntity 后
+        // PersistentEntitySectionManager 的延迟清理尚未完成，或某种竞态重新写回）。
+        // 场景：spawn 被 checkProximity 立即触发，despawn 的清理还没走完流程。
+        // 强制清一次 knownUuids + visibleEntityStorage，然后重试一次。
+        // 副作用：此时世界里确实没有同 UUID 实体（上面 getEntity 已确认），清掉是安全的。
+        sl.entityManager.knownUuids.remove(uuid);
+        sl.entityManager.visibleEntityStorage.remove(real);
+
+        if (sl.addFreshEntity(real)) {
+            spawnFailures.remove(uuid);
+            ModCore.info("[POOL] addFreshEntity succeeded after purge for %s", uuid);
+            return;
+        }
+
+        // 重试仍失败：还有其他原因，计入失败计数
+        spawnFailures.put(uuid, failures + 1);
+        boolean stillKnown = sl.entityManager.knownUuids.contains(uuid);
+        ModCore.warn("[POOL] addFreshEntity failed for %s (attempt %d/%d) after purge. knownUuids.contains=%s",
+                uuid, failures + 1, MAX_SPAWN_FAILURES, stillKnown);
     }
 
     private void ensureChunkLoaded(ModdedEntity e) {
