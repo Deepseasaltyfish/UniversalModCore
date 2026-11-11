@@ -109,6 +109,7 @@ public class ClientEvents {
     public static class ClientEventBus {
         private static Vec3d dragPos = null;
         private static boolean skipNextMouseInputEvent = false;
+        private static boolean isMouseDown = false;
 
         static {
             registerClientEvents();
@@ -128,17 +129,27 @@ public class ClientEvents {
             MouseGuiEvent mevt = new MouseGuiEvent(action, x, y, btn, action == MouseAction.SCROLL ? (int) ((ScreenEvent.MouseScrolled) event).getScrollDeltaY() : 0);
 
             if (!MOUSE_GUI.executeCancellable(h -> h.apply(mevt))) {
-                ((ICancellableEvent)event).setCanceled(true);
+                if (event instanceof ICancellableEvent) {
+                    ((ICancellableEvent)event).setCanceled(true);
+                }
                 if (action != MouseAction.SCROLL) {
-                    // Apparently cancelling this input event only cancels it for the *GUI* handlers, not all input handlers
-                    // Therefore we need to track that ourselves.  Thanks for changing that from 1.12.2-forge
                     skipNextMouseInputEvent = true;
                 }
             }
         }
 
         @SubscribeEvent
+        public static void onGuiRender(ScreenEvent.Render.Pre event) {
+            if (isMouseDown) return;
+            MouseGuiEvent mevt = new MouseGuiEvent(MouseAction.MOVE, (int) event.getMouseX(), (int) event.getMouseY(), -1, 0);
+            MOUSE_GUI.execute(h -> {
+                h.apply(mevt);
+            });
+        }
+
+        @SubscribeEvent
         public static void onGuiClick(ScreenEvent.MouseButtonPressed.Pre event) {
+            isMouseDown = true;
             onGuiMouse(event, (int) event.getMouseX(), (int) event.getMouseY(), event.getButton(), MouseAction.CLICK);
         }
         @SubscribeEvent
@@ -147,6 +158,7 @@ public class ClientEvents {
         }
         @SubscribeEvent
         public static void onGuiRelease(ScreenEvent.MouseButtonReleased.Pre event) {
+            isMouseDown = false;
             onGuiMouse(event, (int) event.getMouseX(), (int) event.getMouseY(), event.getButton(), MouseAction.RELEASE);
         }
         @SubscribeEvent
