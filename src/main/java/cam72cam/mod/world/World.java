@@ -53,6 +53,7 @@ import net.neoforged.neoforge.items.IItemHandlerModifiable;
 import org.apache.commons.lang3.NotImplementedException;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -66,6 +67,7 @@ public class World {
     private static final Map<String, World> clientWorlds = new HashMap<>();
     private static final Map<String, World> serverWorlds = new HashMap<>();
     private static final Queue<Consumer<World>> onTicks = new ConcurrentLinkedDeque<>();
+    private final Set<net.minecraft.world.entity.Entity> pendingJoins = ConcurrentHashMap.newKeySet();
 
     /** Internal, do not use */
     public final Level internal;
@@ -116,15 +118,26 @@ public class World {
     /** Called from Event system, wires into common world events */
     public static void registerEvents() {
         CommonEvents.Entity.JOIN.subscribe((world, entity) -> {
-            get(world).onEntityAdded(entity);
+            if (entity instanceof ModdedEntity) {
+                get(world).pendingJoins.add(entity);
+            } else {
+                get(world).onEntityAdded(entity);
+            }
             return true;
         });
 
         CommonEvents.World.LOAD.subscribe(World::loadWorld);
 
-        CommonEvents.World.UNLOAD.subscribe(world -> getWorldMap(world).remove(world.dimension().location().toString()));
+        CommonEvents.World.UNLOAD.subscribe(world -> {
+            World removed = getWorldMap(world).remove(world.dimension().location().toString());
+            if (removed != null) {
+                removed.pendingJoins.clear();
+            }
+        });
 
         CommonEvents.World.TICK.subscribe(world -> onTicks.forEach(fn -> fn.accept(get(world))));
+
+        CommonEvents.World.TICK.subscribe(world -> get(world).processPendingJoins());
 
         CommonEvents.World.TICK.subscribe(world -> get(world).checkLoadedEntities());
     }
@@ -132,9 +145,33 @@ public class World {
     public static void registerClientEvnets() {
         ClientEvents.TICK.subscribe(() -> {
             if (MinecraftClient.isReady()) {
-                MinecraftClient.getPlayer().getWorld().checkLoadedEntities();
+                World w = MinecraftClient.getPlayer().getWorld();
+                w.processPendingJoins();
+                w.checkLoadedEntities();
             }
         });
+    }
+
+    /**
+     * EntityJoinLevelEvent 在 addFreshEntity 事务中间 fire，此时实体可能还没进 EntityLookup
+     * （addNewEntity 失败、chunk 未加载推迟、被其他 mod 取消等）。
+     * 这里延迟到下一 tick，确认 internal.getEntity(id) == entity 后才记录到
+     * entityByID / entityByUUID / entitiesByClass，避免 Simulation 使用未稳定实体。
+     */
+    private void processPendingJoins() {
+        if (pendingJoins.isEmpty()) return;
+        Iterator<net.minecraft.world.entity.Entity> it = pendingJoins.iterator();
+        while (it.hasNext()) {
+            net.minecraft.world.entity.Entity e = it.next();
+            if (e.isRemoved()) {
+                it.remove();
+                continue;
+            }
+            if (internal.getEntity(e.getId()) == e) {
+                onEntityAdded(e);
+                it.remove();
+            }
+        }
     }
 
     @OnlyIn(Dist.CLIENT)

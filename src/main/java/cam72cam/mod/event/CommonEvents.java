@@ -130,6 +130,18 @@ public class CommonEvents {
             if (!Entity.JOIN.executeCancellable(x -> x.onJoin(event.getLevel(), event.getEntity()))) {
                 event.setCanceled(true);
             }
+            // 诊断：fire 完之后，实体的实际加入状态
+            net.minecraft.world.entity.Entity e = event.getEntity();
+            if (!event.getLevel().isClientSide()) {
+                ServerLevel sl = (ServerLevel) event.getLevel();
+                boolean inLookup = sl.getEntity(e.getUUID()) == e;
+                System.out.println("[DIAG-JOIN] uuid=" + e.getUUID()
+                        + " id=" + e.getId()
+                        + " inLookup=" + inLookup
+                        + " isRemoved=" + e.isRemoved()
+                        + " addedToLevel=" + e.isAddedToLevel()
+                        + " canceled=" + event.isCanceled());
+            }
         }
 
         @SubscribeEvent
