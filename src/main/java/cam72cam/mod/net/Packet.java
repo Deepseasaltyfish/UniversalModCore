@@ -111,6 +111,7 @@ public abstract class Packet {
                  InvocationTargetException | NoSuchMethodException e) {
             throw new RuntimeException(e);
         }
+        newPacket.raw = msg.packet.raw;
         return newPacket;
     }
 
