@@ -124,6 +124,10 @@ public class World {
 
         CommonEvents.World.UNLOAD.subscribe(world -> getWorldMap(world).remove(world.dimension().location().toString()));
 
+        // Must run before the mod tick handlers (their simulations): a consist saved by
+        // the previous session has to be complete before it starts moving again.
+        CommonEvents.World.TICK.subscribe(world -> ChunkManager.onWorldTickEarly(get(world)));
+
         CommonEvents.World.TICK.subscribe(world -> onTicks.forEach(fn -> fn.accept(get(world))));
 
         CommonEvents.World.TICK.subscribe(world -> get(world).checkLoadedEntities());
