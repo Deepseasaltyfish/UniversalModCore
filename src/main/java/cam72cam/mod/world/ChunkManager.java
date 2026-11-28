@@ -99,7 +99,7 @@ public class ChunkManager {
                     ModCore.catching(e);
                 }
             }
-            ModCore.info("[UMCDBG] restored %s remembered chunks (%s loaded now)", pending.size(), forced);
+            ModCore.debug("[UMCDBG] restored %s remembered chunks (%s loaded now)", pending.size(), forced);
         }
 
         /*
@@ -123,7 +123,7 @@ public class ChunkManager {
             }
         }
         if (dropped > 0 || now % 200 == 0) {
-            ModCore.info("[UMCDBG] keeping %s chunks (%s dropped this tick)", kept, dropped);
+            ModCore.debug("[UMCDBG] keeping %s chunks (%s dropped this tick)", kept, dropped);
         }
     }
 
@@ -190,7 +190,7 @@ public class ChunkManager {
             }
             try {
                 Files.write(chunkData(world), lines, StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-                ModCore.info("[UMCDBG] saved %s remembered chunks", lines.size());
+                ModCore.debug("[UMCDBG] saved %s remembered chunks", lines.size());
             } catch (IOException e) {
                 ModCore.catching(e);
             }
@@ -218,7 +218,7 @@ public class ChunkManager {
                         synchronized (PENDING_LOADS) {
                             PENDING_LOADS.put(World.get(world), pending);
                         }
-                        ModCore.info("[UMCDBG] chunks.raw has %s entries", pending.size());
+                        ModCore.debug("[UMCDBG] chunks.raw has %s entries", pending.size());
                     }
                 } catch (IOException e) {
                     ModCore.catching(e);
